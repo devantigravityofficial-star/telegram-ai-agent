@@ -20,6 +20,9 @@ if not TELEGRAM_TOKEN or not GROQ_API_KEY:
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+# httpx logs every request URL, and Telegram URLs contain the bot token. Keep them out of the logs.
+for _noisy in ("httpx", "httpcore", "telegram.ext"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")

@@ -1,7 +1,7 @@
 """24/7 Telegram AI Agent: 100% Free Autonomous Assistant with Web Search & Scheduled Tasks.
 Built for @AntigravityDev Community.
 """
-import os, sys, logging, asyncio, json, requests
+import os, re, sys, time, logging, asyncio, json
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 groq_client = Groq(api_key=GROQ_API_KEY)
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
+STARTED_AT = time.time()
+
 # In-memory user conversation history
 user_conversations = {}
 
@@ -37,21 +39,21 @@ You can help with:
 Keep your answers formatted cleanly with Telegram Markdown (bold, bullet points).
 """
 
-def duckduckgo_search(query: str, max_results: int = 3) -> str:
-    """Free web search using DuckDuckGo Instant Answer API."""
-    try:
-        url = f"https://api.duckduckgo.com/?q={requests.utils.quote(query)}&format=json&no_html=1&skip_disambig=1"
-        resp = requests.get(url, timeout=10).json()
-        abstract = resp.get("AbstractText", "")
-        if abstract:
-            return f"Web Search Result for '{query}':\n{abstract}"
-        # Related topics fallback
-        topics = [t.get("Text", "") for t in resp.get("RelatedTopics", [])[:max_results] if "Text" in t]
-        if topics:
-            return f"Web Search Results for '{query}':\n" + "\n".join(f"- {t}" for t in topics)
-        return "No direct web answer found, will answer from knowledge base."
-    except Exception as e:
-        return f"Web search temporarily unavailable: {e}"
+def web_search(query: str) -> str:
+    """Live web search using Groq's built-in browser_search tool (works with gpt-oss models).
+    One search can use ~15k tokens, so the free daily token limit allows only a handful of searches."""
+    completion = groq_client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": "Answer using the web search tool. Be concise (max 6 bullet points). Name the source site for each point. Never invent URLs."},
+            {"role": "user", "content": query},
+        ],
+        tools=[{"type": "browser_search"}],
+        tool_choice="required",
+        max_tokens=1200,
+    )
+    text = completion.choices[0].message.content or "No answer."
+    return re.sub(r"【[^】]*】", "", text).strip()  # strip citation markers
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
@@ -85,27 +87,31 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
-        await update.message.reply_text("Usage: `/search <your query>`", parse_mode="Markdown")
+        await update.message.reply_text("Usage: /search <your query>")
         return
-    await update.message.reply_text(f"🔍 *Searching the web for:* `{query}`...", parse_mode="Markdown")
-    res = duckduckgo_search(query)
-    # Summarize with AI
-    prompt = f"Summarize these search results clearly for the user:\n\n{res}"
-    chat = groq_client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "system", "content": "You are a concise researcher."}, {"role": "user", "content": prompt}]
-    )
-    await update.message.reply_text(chat.choices[0].message.content)
+    await update.message.reply_text(f"🔍 Searching the web for: {query} ...")
+    try:
+        answer = await asyncio.to_thread(web_search, query)
+        await update.message.reply_text(answer[:4000])
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        await update.message.reply_text("⚠️ Search failed. The free Groq limit may be used up for now - try again later.")
 
 async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("☕ *Generating your AI Morning Briefing...*", parse_mode="Markdown")
+    await update.message.reply_text("☕ Generating your morning briefing...")
     now_str = datetime.now().strftime("%A, %d %B %Y")
-    prompt = f"Today is {now_str}. Generate an energetic, productive 4-point morning briefing covering top tech trends, motivation, and a daily productivity tip."
-    chat = groq_client.chat.completions.create(
+    prompt = (f"Today is {now_str}. Write a short, energetic morning briefing with exactly 3 parts: "
+              "1) one line of motivation, 2) a simple 3-step plan for a productive day, 3) one productivity tip. "
+              "Do NOT mention news, trends or events, and do NOT include any links or URLs.")
+    chat = await asyncio.to_thread(lambda: groq_client.chat.completions.create(
         model=MODEL,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
-    )
-    await update.message.reply_text(f"🌅 *Daily Briefing — {now_str}*\n\n" + chat.choices[0].message.content, parse_mode="Markdown")
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+        max_tokens=600))
+    await update.message.reply_text(f"🌅 Daily Briefing - {now_str}\n\n" + chat.choices[0].message.content)
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    up = int(time.time() - STARTED_AT)
+    await update.message.reply_text(f"✅ Online. Model: {MODEL}. Uptime since last wake-up: {up // 60} min {up % 60} s.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -146,6 +152,7 @@ def main():
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("✅ AI Agent is Online & Listening on Telegram!")
 

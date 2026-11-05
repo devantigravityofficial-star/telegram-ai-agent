@@ -22,12 +22,13 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 groq_client = Groq(api_key=GROQ_API_KEY)
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # In-memory user conversation history
 user_conversations = {}
 
 SYSTEM_PROMPT = """You are an intelligent, proactive personal AI Agent running 24/7 on Telegram for your user.
-You are powered by Llama 3.3 70B via Groq.
+You are powered by an open model (openai/gpt-oss-120b) via Groq.
 Your personality: Helpful, smart, polite, concise, and proactive.
 You can help with:
 1. Answering any questions, writing code, brainstorming, and writing scripts.
@@ -57,7 +58,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"👋 *Namaste {user_name}! I am your personal 24/7 AI Agent.*\n\n"
         "⚡ *My Superpowers:*\n"
-        "• 🧠 *Ultra-Fast AI:* Powered by Llama 3.3 70B via Groq\n"
+        "• 🧠 *Ultra-Fast AI:* Powered by an open model (openai/gpt-oss-120b) via Groq\n"
         "• 🌐 *Web Search:* Ask me about real-time events or research\n"
         "• ☁️ *Always Ready:* Hosted on the cloud, wakes up when you message (first reply can take ~1 min)\n"
         "• 💻 *Coding Assistant:* Python, Web Dev, bug fixes & scripts\n\n"
@@ -91,7 +92,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Summarize with AI
     prompt = f"Summarize these search results clearly for the user:\n\n{res}"
     chat = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=MODEL,
         messages=[{"role": "system", "content": "You are a concise researcher."}, {"role": "user", "content": prompt}]
     )
     await update.message.reply_text(chat.choices[0].message.content)
@@ -101,7 +102,7 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.now().strftime("%A, %d %B %Y")
     prompt = f"Today is {now_str}. Generate an energetic, productive 4-point morning briefing covering top tech trends, motivation, and a daily productivity tip."
     chat = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=MODEL,
         messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
     )
     await update.message.reply_text(f"🌅 *Daily Briefing — {now_str}*\n\n" + chat.choices[0].message.content, parse_mode="Markdown")
@@ -124,7 +125,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=MODEL,
             messages=messages,
             temperature=0.7,
             max_tokens=1024
